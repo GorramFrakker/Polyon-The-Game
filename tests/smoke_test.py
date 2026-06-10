@@ -146,6 +146,82 @@ def main():
     frames(game, 2, [key_event(pg.K_p)])
     assert game.state == "pause"
     snap(game, "12_pause")
+    frames(game, 2, [key_event(pg.K_q)])
+    assert game.state == "title"
+
+    # --- v2: power-ups ---
+    game.reset_run()
+    game.hole = 1
+    game.start_hole()
+    game.set_state("play")
+    frames(game, 5)
+    # catch a multishot pickup dropped onto the player
+    game.powerups.append(g.PowerUp("multi", game.player_x,
+                                   g.PLAYER_Y - 10, game.sprites))
+    frames(game, 2)
+    assert game.powers["multi"] > 0, "multishot not caught"
+    # multishot fires two prills per volley
+    game.bullets.clear()
+    game.player_cooldown = 0.0
+    game.update_player(1 / 60, {pg.K_SPACE: True, pg.K_LEFT: False,
+                                pg.K_RIGHT: False, pg.K_a: False,
+                                pg.K_d: False})
+    assert len(game.bullets) == 2, f"expected 2 bullets, got {len(game.bullets)}"
+    # rapid fire halves the cooldown
+    game.powers["rapid"] = 12.0
+    game.player_cooldown = 0.0
+    game.bullets.clear()
+    game.update_player(1 / 60, {pg.K_SPACE: True, pg.K_LEFT: False,
+                                pg.K_RIGHT: False, pg.K_a: False,
+                                pg.K_d: False})
+    assert abs(game.player_cooldown - 0.15) < 1e-6
+    # power shot doubles damage
+    game.powers["power"] = 12.0
+    game.god_mode = False
+    assert game.shot_damage() == 2
+    game.powers["power"] = 0.0
+    assert game.shot_damage() == 1
+    snap(game, "13_powerups")
+
+    # --- v2: god mode ---
+    game.set_state("title")
+    assert not game.god_revealed
+    for ch in g.GOD_CODE:
+        frames(game, 1, [key_event(getattr(pg, "K_" + ch), ch)])
+    assert game.god_revealed, "typing 1941 should reveal the god button"
+    frames(game, 2, [key_event(pg.K_g)])
+    assert game.god_mode, "G should toggle god mode once revealed"
+    snap(game, "14_god_button")
+    # clicking the button toggles it off and on again
+    click = pg.event.Event(pg.MOUSEBUTTONDOWN, pos=game.god_button.center,
+                           button=1)
+    frames(game, 1, [click])
+    assert not game.god_mode
+    frames(game, 1, [click])
+    assert game.god_mode
+    # start a god run: 100x damage, no deaths, no leaderboard
+    frames(game, 2, [key_event(pg.K_RETURN)])
+    frames(game, 170)
+    assert game.state == "play" and game.god_used
+    assert game.shot_damage() == 100
+    lives = game.lives
+    game.kill_player()
+    assert game.lives == lives and game.state == "play", "god mode must not die"
+    game.score = 10 ** 6
+    assert not game.is_high_score(), "god runs must not hit the leaderboard"
+    # a mower (3 hp) dies to a single god prill
+    e = game.swarm.alive_enemies()[0]
+    r = game.swarm.enemy_rect(e)
+    game.bullets.append(g.Shot(game.sprites["bb"], r.centerx, r.centery, 0, 0))
+    game.handle_collisions()
+    assert not e.alive
+    frames(game, 2)
+    snap(game, "15_god_play")
+    # god mode survives an invasion by pushing the swarm back
+    lives = game.lives
+    game.swarm.y = g.INVASION_Y
+    frames(game, 2)
+    assert game.state == "play" and game.lives == lives
 
     pg.quit()
     print("ALL SMOKE TESTS PASSED")
