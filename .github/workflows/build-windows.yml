@@ -3,7 +3,11 @@ name: Build Windows Executable
 on:
   push:
     branches: [main, "claude/**"]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -29,3 +33,13 @@ jobs:
         with:
           name: PolyonTheGame-Windows
           path: dist/PolyonTheGame.exe
+
+      - name: Attach executable to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/PolyonTheGame.exe
+          name: "POLYON: The Game ${{ github.ref_name }}"
+          body: |
+            Single-file Windows executable. Download `PolyonTheGame.exe`
+            below and double-click to play. No installation required.

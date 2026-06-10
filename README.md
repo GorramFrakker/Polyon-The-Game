@@ -32,16 +32,15 @@ the Marshal's Cart at the turn, and take down the Mega Mower 9000 on 18.
 
 ## Play it on Windows
 
-**Option 1 — download the executable:** every push builds
-`PolyonTheGame.exe` via GitHub Actions. Grab the
-`PolyonTheGame-Windows` artifact from the latest
-[Actions run](../../actions), unzip, and double-click `PolyonTheGame.exe`.
-No install needed.
+Download **`PolyonTheGame.exe`** from the
+[latest release](../../releases/latest) and double-click it.
+It is a single self-contained executable — no installation, no Python,
+no scripts required.
 
-**Option 2 — build it yourself:** on a Windows machine with Python 3.10+,
-run `build_windows.bat`. The executable lands in `dist\PolyonTheGame.exe`.
+(Every release is built and smoke-tested automatically on Windows by
+GitHub Actions using PyInstaller.)
 
-**Option 3 — run from source** (any OS):
+**Or run from source** (any OS):
 
 ```sh
 pip install -r requirements.txt
