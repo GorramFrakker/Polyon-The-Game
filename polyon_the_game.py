@@ -45,6 +45,19 @@ POWERUP_INFO = {
 POWERUP_DROP_CHANCE = 0.08
 GOD_CODE = "1941"  # Harrell's founding year
 
+POWERUP_FILES = {
+    "multi": "multishot.png",
+    "power": "MoreShots.png",
+    "rapid": "FastShot.png",
+}
+
+
+def resource_path(name):
+    """Locate a bundled asset both from source and inside the PyInstaller exe."""
+    base = getattr(sys, "_MEIPASS",
+                   os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
+
 GREEN_DARK = (0, 84, 42)
 GREEN = (0, 132, 61)
 GREEN_BRIGHT = (40, 168, 92)
@@ -459,6 +472,30 @@ def make_powerup(kind, size=30):
             pg.draw.line(s, YELLOW, (c + dx, c + 4),
                          (c + dx, c + 9 - abs(dx) // 3), 2)
     return s
+
+
+def load_powerup_token(kind, size=36):
+    """Round token cut from the Harrell's artwork shipped with the game.
+    Falls back to the drawn badge if the image file is missing."""
+    try:
+        img = pg.image.load(resource_path(POWERUP_FILES[kind])).convert_alpha()
+    except Exception:
+        return make_powerup(kind)
+    w, h = img.get_size()
+    side = min(w, h)
+    img = img.subsurface(((w - side) // 2, (h - side) // 2, side, side))
+    img = pg.transform.smoothscale(img, (size, size))
+    token = pg.Surface((size, size), pg.SRCALPHA)
+    token.blit(img, (0, 0))
+    c = size / 2 - 0.5
+    r = size / 2 - 1
+    for y in range(size):
+        for x in range(size):
+            if (x - c) ** 2 + (y - c) ** 2 > r * r:
+                token.set_at((x, y), (0, 0, 0, 0))
+    pg.draw.circle(token, BLUE, (size // 2, size // 2), size // 2 - 1, 2)
+    pg.draw.circle(token, WHITE, (size // 2, size // 2), size // 2 - 3, 1)
+    return token
 
 
 def make_h_mark(h=30):
@@ -918,9 +955,9 @@ class Game:
             "boss_mower": make_mega_mower(),
             "droplet": make_droplet(),
             "mini_ball": make_mini_ball(),
-            "pu_multi": make_powerup("multi"),
-            "pu_power": make_powerup("power"),
-            "pu_rapid": make_powerup("rapid"),
+            "pu_multi": load_powerup_token("multi"),
+            "pu_power": load_powerup_token("power"),
+            "pu_rapid": load_powerup_token("rapid"),
             "h_mark": make_h_mark(26),
         }
         pg.display.set_icon(self.sprites["bb"])

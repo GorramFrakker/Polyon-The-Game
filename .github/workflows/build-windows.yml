@@ -26,7 +26,12 @@ jobs:
         run: python tests/smoke_test.py
 
       - name: Build executable
-        run: pyinstaller --onefile --windowed --name PolyonTheGame polyon_the_game.py
+        run: >
+          pyinstaller --onefile --windowed --name PolyonTheGame
+          --add-data "multishot.png;."
+          --add-data "MoreShots.png;."
+          --add-data "FastShot.png;."
+          polyon_the_game.py
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
