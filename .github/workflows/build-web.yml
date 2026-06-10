@@ -29,6 +29,31 @@ jobs:
       - name: Build web bundle
         run: python -m pygbag --build .
 
+      - name: Verify archive is valid gzip
+        run: python -c "assert open('build/web/polyon-the-game.tar.gz','rb').read(2) == b'\x1f\x8b', 'archive is not gzipped'"
+
+      # Azure SWA serves *.gz with Content-Encoding gzip, so browsers
+      # transparently decompress and pygbag's loader gets a plain tar.
+      # Serve the archive as an opaque .bin and rewrite the original URL.
+      - name: Add Azure SWA config for the game archive
+        run: |
+          mv build/web/polyon-the-game.tar.gz build/web/polyon-the-game.bin
+          cat > build/web/staticwebapp.config.json <<'EOF'
+          {
+            "routes": [
+              {
+                "route": "/polyon-the-game.tar.gz",
+                "rewrite": "/polyon-the-game.bin",
+                "headers": { "Content-Type": "application/octet-stream" }
+              }
+            ],
+            "mimeTypes": {
+              ".bin": "application/octet-stream",
+              ".apk": "application/octet-stream"
+            }
+          }
+          EOF
+
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
         with:
