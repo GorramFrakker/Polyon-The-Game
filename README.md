@@ -15,6 +15,9 @@ the Marshal's Cart at the turn, and take down the Mega Mower 9000 on 18.
 - **Two boss fights**: the Marshal's Cart (hole 9) and the Mega Mower 9000
   (hole 18)
 - **Bonus golf cart** flybys, extra-bag lives, hole-clear bonuses
+- **Power-ups** dropped by fallen enemies (and every bonus cart):
+  Multishot (double prills per volley), Power Shot (double damage), and
+  Rapid Fire (double fire rate) — each lasts 12 seconds and they stack
 - **Persistent high score leaderboard** with arcade-style initials entry
 - All artwork drawn in code in the POLYON green / Harrell's blue palette —
   no asset files needed
@@ -65,6 +68,10 @@ Windows (`~/.polyon_the_game/` elsewhere).
 | Spare bags at victory | 1000 each |
 
 Extra bag (life) every 10,000 points.
+
+*Clubhouse legend: regulars whisper that typing the year Harrell's was
+founded on the title screen reveals something the greenskeeper doesn't
+want you to have. Such runs are barred from the leaderboard.*
 
 ## Development
 

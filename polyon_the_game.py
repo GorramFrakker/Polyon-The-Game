@@ -34,6 +34,16 @@ HUD_H = 54
 PLAYER_Y = HEIGHT - 78
 INVASION_Y = PLAYER_Y - 46
 TOTAL_HOLES = 18
+VERSION = "2.0"
+
+POWERUP_INFO = {
+    # kind: (display name, duration in seconds)
+    "multi": ("MULTISHOT!", 12.0),
+    "power": ("POWER SHOT!", 12.0),
+    "rapid": ("RAPID FIRE!", 12.0),
+}
+POWERUP_DROP_CHANCE = 0.08
+GOD_CODE = "1941"  # Harrell's founding year
 
 GREEN_DARK = (0, 84, 42)
 GREEN = (0, 132, 61)
@@ -167,6 +177,9 @@ class Sounds:
                                         420, vol=0.25)
         self.bank["life"] = self._tone([(784, 1046), (1046, 1568)], 300, vol=0.25)
         self.bank["boss_hit"] = self._tone([(180, 140)], 70, vol=0.25)
+        self.bank["power"] = self._tone([(523, 784), (784, 1175)], 200, vol=0.25)
+        self.bank["god"] = self._tone([(196, 392), (392, 784), (784, 1568)],
+                                      500, vol=0.3)
 
     def _tone(self, sweeps, ms, vol=0.3):
         n = int(self.RATE * ms / 1000)
@@ -412,6 +425,57 @@ def make_mini_ball():
     pg.draw.circle(s, (200, 206, 202), (9, 9), 6, 2)
     pg.draw.circle(s, (196, 202, 198), (5, 5), 1)
     pg.draw.circle(s, (196, 202, 198), (9, 6), 1)
+    return s
+
+
+def _draw_prill(s, x, y, r):
+    pg.draw.circle(s, GREEN_DARK, (x, y), r)
+    pg.draw.circle(s, BB_GREEN, (x - 1, y - 1), r - 1)
+    pg.draw.circle(s, BB_LIGHT, (x - r // 2, y - r // 2), max(1, r // 3))
+
+
+def make_powerup(kind, size=30):
+    """Falling power-up badge: blue Harrell's ring with a prill motif."""
+    s = pg.Surface((size, size), pg.SRCALPHA)
+    c = size // 2
+    pg.draw.circle(s, (*BLUE, 90), (c, c), c)
+    pg.draw.circle(s, BLUE, (c, c), c - 2)
+    pg.draw.circle(s, WHITE, (c, c), c - 4, 2)
+    if kind == "multi":
+        # two prills side by side: twice the shots
+        _draw_prill(s, c - 5, c, 5)
+        _draw_prill(s, c + 5, c, 5)
+    elif kind == "power":
+        # one heavy prill in a starburst: twice the damage
+        for ang in range(0, 360, 45):
+            x = c + (c - 6) * math.cos(math.radians(ang))
+            y = c + (c - 6) * math.sin(math.radians(ang))
+            pg.draw.line(s, YELLOW, (c, c), (int(x), int(y)), 2)
+        _draw_prill(s, c, c, 6)
+    elif kind == "rapid":
+        # prill with speed trails: twice the rate of fire
+        _draw_prill(s, c, c - 3, 5)
+        for i, dx in enumerate((-5, 0, 5)):
+            pg.draw.line(s, YELLOW, (c + dx, c + 4),
+                         (c + dx, c + 9 - abs(dx) // 3), 2)
+    return s
+
+
+def make_h_mark(h=30):
+    """The Harrell's double-bar H emblem with the green dot."""
+    bw = int(h * 0.30)
+    skew = int(h * 0.18)
+    gap = int(h * 0.24)
+    w = bw * 2 + gap + skew * 2
+    s = pg.Surface((w, h), pg.SRCALPHA)
+    for off in (0, bw + gap):
+        pts = [(skew + off + skew, 0), (skew + off + bw + skew, 0),
+               (skew + off + bw - skew + skew, h), (skew + off, h)]
+        pg.draw.polygon(s, BLUE, pts)
+    midy = h // 2
+    pg.draw.rect(s, BLUE, (skew // 2, midy - h // 6, w - skew, h // 3))
+    pg.draw.circle(s, WHITE, (w // 2, midy), int(h * 0.24))
+    pg.draw.circle(s, GREEN, (w // 2, midy), int(h * 0.17))
     return s
 
 
@@ -804,6 +868,29 @@ class BonusCart:
         surf.blit(img, self.rect)
 
 
+class PowerUp:
+    """Dropped by destroyed enemies; drifts down for the player to catch."""
+
+    def __init__(self, kind, x, y, sprites):
+        self.kind = kind
+        self.image = sprites["pu_" + kind]
+        self.x = x
+        self.y = y
+        self.t = 0.0
+
+    @property
+    def rect(self):
+        return self.image.get_rect(center=(int(self.x), int(self.y)))
+
+    def update(self, dt):
+        self.t += dt
+        self.y += 110 * dt
+        self.x += 30 * math.sin(self.t * 3.0) * dt
+
+    def offscreen(self):
+        return self.y > HEIGHT + 20
+
+
 # ---------------------------------------------------------------------------
 # The Game
 # ---------------------------------------------------------------------------
@@ -831,6 +918,10 @@ class Game:
             "boss_mower": make_mega_mower(),
             "droplet": make_droplet(),
             "mini_ball": make_mini_ball(),
+            "pu_multi": make_powerup("multi"),
+            "pu_power": make_powerup("power"),
+            "pu_rapid": make_powerup("rapid"),
+            "h_mark": make_h_mark(26),
         }
         pg.display.set_icon(self.sprites["bb"])
         self.background = make_background()
@@ -846,6 +937,11 @@ class Game:
         ]
         self.state = "title"
         self.state_t = 0.0
+        self.cheat_buffer = ""
+        self.god_revealed = False
+        self.god_mode = False
+        self.god_button = pg.Rect(0, 0, 220, 40)
+        self.god_button.bottomright = (WIDTH - 16, HEIGHT - 14)
         self.reset_run()
 
     # -- run / state management ---------------------------------------------
@@ -866,10 +962,14 @@ class Game:
         self.bonus = None
         self.bonus_timer = random.uniform(14, 22)
         self.popups = []  # (text, x, y, life)
+        self.powerups = []  # falling pickups
+        self.powers = {"multi": 0.0, "power": 0.0, "rapid": 0.0}
+        self.god_used = self.god_mode  # god runs don't hit the leaderboard
 
     def start_hole(self):
         self.bullets.clear()
         self.enemy_shots.clear()
+        self.powerups.clear()
         self.bonus = None
         self.bonus_timer = random.uniform(14, 22)
         if self.hole in (9, 18):
@@ -893,6 +993,8 @@ class Game:
             self.popups.append(["EXTRA BAG!", WIDTH / 2, HEIGHT / 2, 1.6])
 
     def is_high_score(self):
+        if self.god_used:
+            return False
         return (len(self.highscores) < 10 or
                 self.score > self.highscores[-1]["score"]) and self.score > 0
 
@@ -931,10 +1033,25 @@ class Game:
                     self.start_hole()
                 elif ev.key == pg.K_h:
                     self.set_state("scores")
+                elif ev.key == pg.K_g and self.god_revealed:
+                    self.toggle_god_mode()
                 elif ev.key == pg.K_ESCAPE:
                     return False
+                if ev.unicode and ev.unicode.isprintable():
+                    self.cheat_buffer = (self.cheat_buffer + ev.unicode)[-8:]
+                    if (not self.god_revealed and
+                            self.cheat_buffer.endswith(GOD_CODE)):
+                        self.god_revealed = True
+                        self.snd.play("god")
+            elif (ev.type == pg.MOUSEBUTTONDOWN and self.god_revealed and
+                  self.god_button.collidepoint(ev.pos)):
+                self.toggle_god_mode()
         self._update_title_prills(dt)
         self.draw_title()
+
+    def toggle_god_mode(self):
+        self.god_mode = not self.god_mode
+        self.snd.play("god" if self.god_mode else "hit")
 
     def state_scores(self, dt, events, keys):
         for ev in events:
@@ -1079,12 +1196,24 @@ class Game:
         self.player_x = max(34, min(WIDTH - 34, self.player_x))
         self.player_cooldown = max(0.0, self.player_cooldown - dt)
         self.invuln = max(0.0, self.invuln - dt)
+        multi = self.powers["multi"] > 0
+        rapid = self.powers["rapid"] > 0
+        cap = 3 * (2 if multi else 1) * (2 if rapid else 1)
         if (keys[pg.K_SPACE] and self.player_cooldown == 0
-                and len(self.bullets) < 3):
-            self.bullets.append(Shot(self.sprites["bb"], self.player_x,
-                                     PLAYER_Y - 36, 0, -540))
-            self.player_cooldown = 0.3
+                and len(self.bullets) < cap):
+            offsets = (-9, 9) if multi else (0,)
+            for dx in offsets:
+                self.bullets.append(Shot(self.sprites["bb"],
+                                         self.player_x + dx,
+                                         PLAYER_Y - 36, 0, -540))
+            self.player_cooldown = 0.15 if rapid else 0.3
             self.snd.play("shoot")
+
+    def shot_damage(self):
+        dmg = 2 if self.powers["power"] > 0 else 1
+        if self.god_mode:
+            dmg *= 100
+        return dmg
 
     def update_world(self, dt, freeze_enemies=False):
         if not freeze_enemies:
@@ -1122,6 +1251,12 @@ class Game:
             shot.update(dt)
             if shot.offscreen():
                 self.enemy_shots.remove(shot)
+        for pu in self.powerups[:]:
+            pu.update(dt)
+            if pu.offscreen():
+                self.powerups.remove(pu)
+        for kind in self.powers:
+            self.powers[kind] = max(0.0, self.powers[kind] - dt)
         for p in self.particles[:]:
             p.update(dt)
             if p.life <= 0:
@@ -1138,6 +1273,7 @@ class Game:
 
     def handle_collisions(self):
         # player prills vs enemies / boss / bonus cart
+        dmg = self.shot_damage()
         for shot in self.bullets[:]:
             rect = shot.rect
             hit = False
@@ -1145,7 +1281,7 @@ class Game:
                 for e in self.swarm.alive_enemies():
                     er = self.swarm.enemy_rect(e)
                     if er.colliderect(rect):
-                        e.hp -= 1
+                        e.hp -= dmg
                         e.flash = 0.1
                         hit = True
                         if e.hp <= 0:
@@ -1157,12 +1293,13 @@ class Game:
                             self.explode(er.centerx, er.centery, col)
                             self.explode(er.centerx, er.centery, BB_GREEN, 6)
                             self.snd.play("boom")
+                            self.maybe_drop_powerup(er.centerx, er.centery)
                         else:
                             self.snd.play("hit")
                         break
             if not hit and self.boss:
                 if self.boss.rect.colliderect(rect):
-                    self.boss.hp -= 1
+                    self.boss.hp -= dmg
                     self.boss.flash = 0.08
                     hit = True
                     self.snd.play("boss_hit")
@@ -1178,12 +1315,31 @@ class Game:
                                         self.bonus.x, self.bonus.y, 1.2])
                     self.explode(self.bonus.x, self.bonus.y, YELLOW, 18)
                     self.snd.play("bonus")
+                    self.maybe_drop_powerup(self.bonus.x, self.bonus.y,
+                                            always=True)
                     self.bonus = None
                     hit = True
             if hit:
                 self.bullets.remove(shot)
+        # player catches power-ups
+        catch_rect = self.sprites["player"].get_rect(
+            center=(int(self.player_x), PLAYER_Y)).inflate(16, 10)
+        for pu in self.powerups[:]:
+            if catch_rect.colliderect(pu.rect):
+                self.powerups.remove(pu)
+                name, duration = POWERUP_INFO[pu.kind]
+                self.powers[pu.kind] = duration
+                self.popups.append([name, self.player_x, PLAYER_Y - 60, 1.4])
+                self.snd.play("power")
         # enemy shots vs player
-        if self.invuln <= 0:
+        if self.god_mode:
+            prect = self.sprites["player"].get_rect(
+                center=(int(self.player_x), PLAYER_Y)).inflate(-14, -10)
+            for shot in self.enemy_shots[:]:
+                if prect.colliderect(shot.rect):
+                    self.enemy_shots.remove(shot)
+                    self.explode(self.player_x, PLAYER_Y - 30, YELLOW, 6, 120)
+        elif self.invuln <= 0:
             prect = self.sprites["player"].get_rect(
                 center=(int(self.player_x), PLAYER_Y)).inflate(-14, -10)
             for shot in self.enemy_shots[:]:
@@ -1197,8 +1353,17 @@ class Game:
                         self.kill_player(invasion=True)
                         return
 
+    def maybe_drop_powerup(self, x, y, always=False):
+        if always or random.random() < POWERUP_DROP_CHANCE:
+            kind = random.choice(list(POWERUP_INFO))
+            self.powerups.append(PowerUp(kind, x, y, self.sprites))
+
     def kill_player(self, invasion=False):
         if self.state != "play":
+            return
+        if self.god_mode:
+            if invasion and self.swarm:
+                self.swarm.y = max(HUD_H + 70.0, self.swarm.y - 170)
             return
         self.lives -= 1
         self.explode(self.player_x, PLAYER_Y, WHITE, 24, 240)
@@ -1245,6 +1410,22 @@ class Game:
         text(self.screen, "H - HIGH SCORES", 18, BLUE_LIGHT, center=(cx, 648))
         text(self.screen, "18 holes stand between you and a perfect lawn.",
              16, GREEN_BRIGHT, center=(cx, 688), italic=True)
+        text(self.screen, f"v{VERSION}", 14, GRAY, topleft=(10, HEIGHT - 22))
+        text(self.screen, "Est. 1941", 14, GRAY,
+             topleft=(10, HEIGHT - 40), italic=True)
+        if self.god_revealed:
+            btn = self.god_button
+            pg.draw.rect(self.screen, DARK, btn.move(0, 3), border_radius=10)
+            pg.draw.rect(self.screen, GREEN if self.god_mode else BLUE, btn,
+                         border_radius=10)
+            pg.draw.rect(self.screen, WHITE, btn, 2, border_radius=10)
+            mark = self.sprites["h_mark"]
+            self.screen.blit(mark, mark.get_rect(
+                midleft=(btn.left + 10, btn.centery)))
+            text(self.screen,
+                 "GOD MODE: " + ("ON" if self.god_mode else "OFF"), 18,
+                 YELLOW if self.god_mode else WHITE,
+                 center=(btn.centerx + 18, btn.centery))
 
     def draw_scores(self):
         self.screen.blit(self.background, (0, 0))
@@ -1321,6 +1502,22 @@ class Game:
              center=(WIDTH // 2 + 110, 27))
         for i in range(self.lives):
             self.screen.blit(self.life_icon, (WIDTH - 36 - i * 26, 15))
+        if self.god_mode:
+            text(self.screen, "GOD", 18, YELLOW,
+                 center=(WIDTH - 60 - self.lives * 26, 27))
+        # active power-up badges with remaining-time bars (bottom-left)
+        x = 16
+        for kind in ("multi", "power", "rapid"):
+            left = self.powers[kind]
+            if left <= 0:
+                continue
+            img = self.sprites["pu_" + kind]
+            self.screen.blit(img, (x, HEIGHT - 44))
+            frac = left / POWERUP_INFO[kind][1]
+            pg.draw.rect(self.screen, DARK, (x, HEIGHT - 11, 30, 5))
+            pg.draw.rect(self.screen, YELLOW,
+                         (x, HEIGHT - 11, int(30 * frac), 5))
+            x += 42
 
     def draw_play(self, dim=False, hide_player=False):
         self.screen.blit(self.background, (0, 0))
@@ -1334,12 +1531,20 @@ class Game:
             self.boss.draw(self.screen)
         if self.bonus:
             self.bonus.draw(self.screen)
+        for pu in self.powerups:
+            self.screen.blit(pu.image, pu.rect)
         for shot in self.bullets:
             self.screen.blit(shot.image, shot.rect)
         for shot in self.enemy_shots:
             self.screen.blit(shot.image, shot.rect)
         if not hide_player and not (self.invuln > 0 and
                                     int(self.invuln * 10) % 2 == 0):
+            if self.god_mode:
+                glow = pg.Surface((86, 96), pg.SRCALPHA)
+                pulse = 60 + int(30 * math.sin(self.state_t * 6))
+                pg.draw.ellipse(glow, (*YELLOW, pulse), glow.get_rect())
+                self.screen.blit(glow, glow.get_rect(
+                    center=(int(self.player_x), PLAYER_Y)))
             img = self.sprites["player"]
             self.screen.blit(img, img.get_rect(center=(int(self.player_x),
                                                        PLAYER_Y)))
