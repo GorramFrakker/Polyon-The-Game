@@ -16,6 +16,7 @@ All artwork is drawn in code (no external assets required).
 """
 
 import array
+import asyncio
 import json
 import math
 import os
@@ -34,7 +35,8 @@ HUD_H = 54
 PLAYER_Y = HEIGHT - 78
 INVASION_Y = PLAYER_Y - 46
 TOTAL_HOLES = 18
-VERSION = "3.0"
+VERSION = "3.1"
+IS_WEB = sys.platform == "emscripten"  # running in the browser via pygbag
 
 POWERUP_INFO = {
     # kind: (display name, duration in seconds)
@@ -110,6 +112,19 @@ def scores_path():
 
 
 def load_scores():
+    if IS_WEB:
+        # in the browser, scores live in localStorage
+        try:
+            import platform as wasm
+            raw = wasm.window.localStorage.getItem("polyon_highscores")
+            if raw:
+                scores = [s for s in json.loads(raw)
+                          if "name" in s and "score" in s]
+                if scores:
+                    return sorted(scores, key=lambda s: -s["score"])[:10]
+        except Exception:
+            pass
+        return list(DEFAULT_SCORES)
     try:
         with open(scores_path(), "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -122,6 +137,14 @@ def load_scores():
 
 
 def save_scores(scores):
+    if IS_WEB:
+        try:
+            import platform as wasm
+            wasm.window.localStorage.setItem("polyon_highscores",
+                                             json.dumps(scores[:10]))
+        except Exception:
+            pass
+        return
     try:
         with open(scores_path(), "w", encoding="utf-8") as fh:
             json.dump(scores[:10], fh, indent=2)
@@ -1310,7 +1333,9 @@ class Game:
 
     # -- main loop ------------------------------------------------------------
 
-    def run(self):
+    async def run(self):
+        """Main loop. Async so the browser (pygbag/WebAssembly) can yield
+        to the event loop each frame; on desktop it behaves identically."""
         running = True
         while running:
             dt = min(self.clock.tick(FPS) / 1000.0, 1 / 20)
@@ -1321,6 +1346,7 @@ class Game:
             if not self.step(dt, events):
                 running = False
             pg.display.flip()
+            await asyncio.sleep(0)
         pg.quit()
 
     def step(self, dt, events):
@@ -1882,7 +1908,7 @@ def main():
         pg.quit()
         print("smoke ok")
         return
-    game.run()
+    asyncio.run(game.run())
 
 
 if __name__ == "__main__":
