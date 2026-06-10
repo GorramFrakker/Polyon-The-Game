@@ -34,7 +34,7 @@ HUD_H = 54
 PLAYER_Y = HEIGHT - 78
 INVASION_Y = PLAYER_Y - 46
 TOTAL_HOLES = 18
-VERSION = "2.0"
+VERSION = "3.0"
 
 POWERUP_INFO = {
     # kind: (display name, duration in seconds)
@@ -498,6 +498,276 @@ def load_powerup_token(kind, size=36):
     return token
 
 
+def _is_backdrop(c, min_level=228, max_spread=14):
+    """True for the light gray/white checkerboard squares behind cutouts."""
+    return (min(c.r, c.g, c.b) >= min_level and
+            max(c.r, c.g, c.b) - min(c.r, c.g, c.b) <= max_spread)
+
+
+def strip_checker_bg(img, tol=6):
+    """Flood-fill transparency in from the borders at native resolution,
+    eating only the flat pale checkerboard tiles (239- and 255-gray).
+    Whites inside the artwork survive because anti-aliased edge pixels
+    seal them off from the border. Returns (result, removed_fraction)."""
+    w, h = img.get_size()
+    data = bytearray(pg.image.tobytes(img, "RGBA"))
+
+    def is_bg(i):
+        r, g, b = data[i], data[i + 1], data[i + 2]
+        lo, hi = min(r, g, b), max(r, g, b)
+        return lo >= 239 - tol and hi - lo <= tol
+
+    seen = bytearray(w * h)
+    removed = 0
+    stack = ([x + y * w for x in range(w) for y in (0, h - 1)] +
+             [x + y * w for y in range(h) for x in (0, w - 1)])
+    while stack:
+        idx = stack.pop()
+        if seen[idx]:
+            continue
+        seen[idx] = 1
+        if not is_bg(idx * 4):
+            continue
+        data[idx * 4 + 3] = 0
+        removed += 1
+        x, y = idx % w, idx // w
+        if x > 0:
+            stack.append(idx - 1)
+        if x < w - 1:
+            stack.append(idx + 1)
+        if y > 0:
+            stack.append(idx - w)
+        if y < h - 1:
+            stack.append(idx + w)
+    out = pg.image.frombytes(bytes(data), (w, h), "RGBA").convert_alpha()
+    return out, removed / (w * h)
+
+
+def trim_transparent(img):
+    """Crop to the bounding box of visible pixels."""
+    rect = img.get_bounding_rect(min_alpha=10)
+    return img.subsurface(rect).copy() if rect.w and rect.h else img
+
+
+def _detect_checker_lattice(data, w, h):
+    """Find the checkerboard's tile size, phase and parity from the gray
+    (239,239,239) tiles along the top edge. Returns (t, ox, oy, parity)
+    or None if no clean lattice is visible."""
+    def is_gray(x, y):
+        i = (y * w + x) * 4
+        return (abs(data[i] - 239) <= 2 and abs(data[i + 1] - 239) <= 2
+                and abs(data[i + 2] - 239) <= 2)
+
+    for y in range(2, min(40, h)):
+        starts = [x for x in range(1, w // 2)
+                  if is_gray(x, y) and not is_gray(x - 1, y)][:4]
+        if len(starts) < 3:
+            continue
+        diffs = {starts[k + 1] - starts[k] for k in range(len(starts) - 1)}
+        if len(diffs) != 1:
+            continue
+        period = diffs.pop()
+        if period < 6 or period % 2:
+            continue
+        t = period // 2
+        ox, gy, gx = starts[0] % t, y, starts[0]
+        ys = [yy for yy in range(1, h // 2)
+              if is_gray(gx, yy) and not is_gray(gx, yy - 1)]
+        oy = ys[0] % t if ys else 0
+        parity = ((gx - ox) // t + (gy - oy) // t) % 2
+        return t, ox, oy, parity
+    return None
+
+
+def cut_checker_object(img):
+    """Background removal for white artwork on a white/gray checkerboard.
+
+    Pixel-level flood fills leak: the artwork's flat white is identical
+    to the white tiles, and the anti-aliased tile seams form paths that
+    cross the artwork. So connectivity is computed on the TILE grid
+    instead: a tile is background only if virtually all of its pixels
+    match the color the lattice predicts there, and background must be
+    reachable from the border tile-by-tile. Artwork covering a tile
+    breaks the match and walls off everything behind it. Partial tiles
+    along the silhouette are then erased per-pixel.
+    Returns (result, removed_fraction).
+    """
+    w, h = img.get_size()
+    data = bytearray(pg.image.tobytes(img, "RGBA"))
+    lattice = _detect_checker_lattice(data, w, h)
+    if lattice is None:
+        return img, 0.0
+    t, ox, oy, parity = lattice
+
+    def pixel_matches(x, y, expect_gray):
+        i = (y * w + x) * 4
+        r, g, b = data[i], data[i + 1], data[i + 2]
+        lo, hi = min(r, g, b), max(r, g, b)
+        if hi - lo > 6:
+            return False
+        return (235 <= lo <= 244) if expect_gray else lo >= 251
+
+    i_min, i_max = -(ox // t + 1), (w - 1 - ox) // t
+    j_min, j_max = -(oy // t + 1), (h - 1 - oy) // t
+    ni, nj = i_max - i_min + 1, j_max - j_min + 1
+
+    def tile_is_bg(i, j):
+        expect_gray = (i + j) % 2 == parity
+        x0, y0 = max(0, ox + i * t + 1), max(0, oy + j * t + 1)
+        x1, y1 = min(w, ox + (i + 1) * t - 1), min(h, oy + (j + 1) * t - 1)
+        if x0 >= x1 or y0 >= y1:
+            return False
+        good = total = 0
+        for y in range(y0, y1, 2):
+            for x in range(x0, x1, 2):
+                total += 1
+                good += pixel_matches(x, y, expect_gray)
+        return total > 0 and good / total >= 0.9
+
+    bg = bytearray(ni * nj)
+    for j in range(j_min, j_max + 1):
+        for i in range(i_min, i_max + 1):
+            if tile_is_bg(i, j):
+                bg[(j - j_min) * ni + (i - i_min)] = 1
+    # flood fill across the tile grid from the border tiles
+    filled = bytearray(ni * nj)
+    stack = ([k for k in range(ni)] + [(nj - 1) * ni + k for k in range(ni)] +
+             [r * ni for r in range(nj)] + [r * ni + ni - 1 for r in range(nj)])
+    while stack:
+        k = stack.pop()
+        if filled[k] or not bg[k]:
+            continue
+        filled[k] = 1
+        ci, cj = k % ni, k // ni
+        if ci > 0:
+            stack.append(k - 1)
+        if ci < ni - 1:
+            stack.append(k + 1)
+        if cj > 0:
+            stack.append(k - ni)
+        if cj < nj - 1:
+            stack.append(k + ni)
+
+    removed = 0
+    for j in range(j_min, j_max + 1):
+        for i in range(i_min, i_max + 1):
+            k = (j - j_min) * ni + (i - i_min)
+            # tile extent padded by 1px so the AA seams go too
+            x0, y0 = max(0, ox + i * t - 1), max(0, oy + j * t - 1)
+            x1 = min(w, ox + (i + 1) * t + 1)
+            y1 = min(h, oy + (j + 1) * t + 1)
+            if filled[k]:
+                for y in range(y0, y1):
+                    base = y * w * 4
+                    for x in range(x0, x1):
+                        if data[base + x * 4 + 3]:
+                            data[base + x * 4 + 3] = 0
+                            removed += 1
+                continue
+            # silhouette tiles next to filled background: erase only the
+            # pixels that still look like the predicted backdrop
+            neighbors = ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1))
+            if not any(i_min <= a <= i_max and j_min <= b <= j_max and
+                       filled[(b - j_min) * ni + (a - i_min)]
+                       for a, b in neighbors):
+                continue
+            expect_gray = (i + j) % 2 == parity
+            for y in range(y0 + 1, y1 - 1):
+                for x in range(x0 + 1, x1 - 1):
+                    i4 = (y * w + x) * 4
+                    if data[i4 + 3] and pixel_matches(x, y, expect_gray):
+                        data[i4 + 3] = 0
+                        removed += 1
+    out = pg.image.frombytes(bytes(data), (w, h), "RGBA").convert_alpha()
+    return out, removed / (w * h)
+
+
+def load_player_bag(height=72):
+    """The real POLYON 25KG bag from 'Polyon Bag.png'."""
+    try:
+        img = pg.image.load(resource_path("Polyon Bag.png")).convert_alpha()
+    except Exception:
+        return make_player_bag()
+    img, removed = cut_checker_object(img)
+    # a leak into the white bag body means the cutout failed: fall back
+    if removed > 0.55 or removed < 0.02:
+        return make_player_bag()
+    img = trim_transparent(img)
+    w, h = img.get_size()
+    return pg.transform.smoothscale(img, (max(1, int(w * height / h)), height))
+
+
+def load_bb_bullet(d=13):
+    """One green prill cropped out of the 'BBs.jpeg' photo."""
+    try:
+        img = pg.image.load(resource_path("BBs.jpeg")).convert_alpha()
+    except Exception:
+        return make_bb(5)
+    # find the most vividly green spot in the middle of the photo: that's
+    # the sunlit top of a single prill, and we crop around it
+    w, h = img.get_size()
+    best = None
+    for y in range(h // 4, 3 * h // 4, 3):
+        for x in range(w // 4, 3 * w // 4, 3):
+            c = img.get_at((x, y))
+            score = 2 * c.g - c.r - c.b + (c.r + c.g + c.b) // 4
+            if best is None or score > best[0]:
+                best = (score, x, y)
+    _, cx, cy = best
+    r0 = 13
+    rect = pg.Rect(cx - r0, cy - r0, r0 * 2, r0 * 2).clamp(img.get_rect())
+    patch = pg.transform.smoothscale(img.subsurface(rect).copy(), (d, d))
+    size = d + 4
+    s = pg.Surface((size, size), pg.SRCALPHA)
+    c2 = size // 2
+    pg.draw.circle(s, (*BB_GREEN, 60), (c2, c2), d // 2 + 2)  # soft glow
+    token = pg.Surface((d, d), pg.SRCALPHA)
+    token.blit(patch, (0, 0))
+    mid = d / 2 - 0.5
+    r = d / 2
+    for y in range(d):
+        for x in range(d):
+            if (x - mid) ** 2 + (y - mid) ** 2 > r * r:
+                token.set_at((x, y), (0, 0, 0, 0))
+    s.blit(token, (2, 2))
+    pg.draw.circle(s, BB_LIGHT, (c2 - 2, c2 - 2), 1)  # glint
+    return s
+
+
+def load_harrells_logo(width=380):
+    """The real Harrell's lockup with its checkerboard backdrop removed.
+    The logo has no white of its own, so a plain threshold works here."""
+    try:
+        img = pg.image.load(
+            resource_path("Harrells Logo.png")).convert_alpha()
+    except Exception:
+        return make_harrells_logo(0.8)
+    w, h = img.get_size()
+    img = pg.transform.smoothscale(img, (width, max(1, h * width // w)))
+    w, h = img.get_size()
+    for y in range(h):
+        for x in range(w):
+            if _is_backdrop(img.get_at((x, y)), min_level=222,
+                            max_spread=18):
+                img.set_at((x, y), (0, 0, 0, 0))
+    return trim_transparent(img)
+
+
+def load_polyon_badge(width=330):
+    """The 'Powered by POLYON' photo badge, framed in Polyon green."""
+    try:
+        img = pg.image.load(resource_path("Polyon Logo.png")).convert_alpha()
+    except Exception:
+        return make_polyon_logo(1.0)
+    w, h = img.get_size()
+    img = pg.transform.smoothscale(img, (width, max(1, h * width // w)))
+    s = pg.Surface((img.get_width() + 8, img.get_height() + 8), pg.SRCALPHA)
+    pg.draw.rect(s, GREEN_DARK, s.get_rect(), border_radius=8)
+    s.blit(img, (4, 4))
+    pg.draw.rect(s, GREEN_BRIGHT, s.get_rect(), 3, border_radius=8)
+    return s
+
+
 def make_h_mark(h=30):
     """The Harrell's double-bar H emblem with the green dot."""
     bw = int(h * 0.30)
@@ -944,8 +1214,8 @@ class Game:
         self.snd = Sounds()
 
         self.sprites = {
-            "player": make_player_bag(),
-            "bb": make_bb(5),
+            "player": load_player_bag(),
+            "bb": load_bb_bullet(),
             "ball": make_golf_ball(),
             "flag": make_flag(),
             "sprinkler": make_sprinkler(),
@@ -962,9 +1232,12 @@ class Game:
         }
         pg.display.set_icon(self.sprites["bb"])
         self.background = make_background()
-        self.logo_polyon = make_polyon_logo(1.0)
-        self.logo_harrells = make_harrells_logo(0.8)
-        self.life_icon = pg.transform.smoothscale(self.sprites["player"], (20, 24))
+        self.logo_polyon = load_polyon_badge()
+        self.logo_harrells = load_harrells_logo()
+        self.logo_harrells_small = load_harrells_logo(260)
+        pw, ph = self.sprites["player"].get_size()
+        self.life_icon = pg.transform.smoothscale(
+            self.sprites["player"], (max(1, 24 * pw // ph), 24))
 
         self.highscores = load_scores()
         self.title_prills = [
@@ -1477,8 +1750,8 @@ class Game:
             row = f"{i + 1:>2}.       {s['name']:<8}  {s['score']:>7}       {s.get('hole', 1):>2}"
             text(self.screen, row, 22, col, center=(cx, 180 + i * 36))
         text(self.screen, "PRESS ANY KEY", 20, YELLOW, center=(cx, 600))
-        self.screen.blit(self.logo_harrells, self.logo_harrells.get_rect(
-            midtop=(cx, 630)))
+        self.screen.blit(self.logo_harrells_small,
+                         self.logo_harrells_small.get_rect(midtop=(cx, 628)))
 
     def draw_entry(self):
         self.screen.blit(self.background, (0, 0))
@@ -1512,7 +1785,7 @@ class Game:
         self.screen.blit(self.logo_polyon, self.logo_polyon.get_rect(
             midtop=(cx, 500)))
         if self.state_t > 1.0:
-            text(self.screen, "PRESS ANY KEY", 20, YELLOW, center=(cx, 650))
+            text(self.screen, "PRESS ANY KEY", 20, YELLOW, center=(cx, 678))
 
     def draw_intro_card(self):
         cx = WIDTH // 2
