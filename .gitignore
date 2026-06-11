@@ -5,3 +5,4 @@ dist/
 *.spec
 tests/shots/
 baked/
+*-pygbag.py
