@@ -23,11 +23,13 @@ jobs:
       - name: Smoke test (headless)
         run: python tests/smoke_test.py
 
-      - name: Clean test artifacts before packaging
-        run: rm -rf tests/shots build
-
       - name: Bake processed assets (fast startup in the browser)
         run: python tools/bake_assets.py
+
+      # tests/ and tools/ are build-time only; pygbag tries to transform
+      # every .py it finds and chokes on the bake script
+      - name: Remove build-time files before packaging
+        run: rm -rf tests tools build
 
       - name: Build web bundle
         run: python -m pygbag --build .
