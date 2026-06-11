@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install pygame pygbag
+        run: python -m pip install pygame pygbag soundfile numpy
 
       - name: Smoke test (headless)
         run: python tests/smoke_test.py
@@ -26,13 +26,10 @@ jobs:
       - name: Bake processed assets (fast startup in the browser)
         run: python tools/bake_assets.py
 
-      - name: Convert baked audio to OGG
+      - name: Verify baked audio is OGG
         run: |
-          for f in baked/snd_*.wav; do
-            ffmpeg -loglevel error -y -i "$f" "${f%.wav}.ogg"
-            rm "$f"
-          done
           ls baked/
+          test -f baked/snd_shoot.ogg
 
       # tests/ and tools/ are build-time only; pygbag tries to transform
       # every .py it finds and chokes on the bake script

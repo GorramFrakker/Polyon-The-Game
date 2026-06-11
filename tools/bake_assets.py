@@ -42,15 +42,29 @@ def main():
         pg.image.save(surf, os.path.join(out, name))
         print("baked", name, surf.get_size())
 
+    # OGG when possible (pygbag rejects WAV and rewrites .wav references
+    # in code to .ogg); WAV fallback when soundfile isn't installed
+    try:
+        import numpy as np
+        import soundfile as sf
+    except ImportError:
+        np = sf = None
     for name in g.SOUND_RECIPES:
         data = g.synth_sound_bytes(name)
-        path = os.path.join(out, "snd_%s.wav" % name)
-        with wave.open(path, "wb") as fh:
-            fh.setnchannels(1)
-            fh.setsampwidth(2)
-            fh.setframerate(g.SOUND_RATE)
-            fh.writeframes(data)
-        print("baked snd_%s.wav (%d bytes)" % (name, len(data)))
+        if sf is not None:
+            path = os.path.join(out, "snd_%s.ogg" % name)
+            samples = np.frombuffer(data, dtype=np.int16)
+            sf.write(path, samples, g.SOUND_RATE, format="OGG",
+                     subtype="VORBIS")
+        else:
+            path = os.path.join(out, "snd_%s.wav" % name)
+            with wave.open(path, "wb") as fh:
+                fh.setnchannels(1)
+                fh.setsampwidth(2)
+                fh.setframerate(g.SOUND_RATE)
+                fh.writeframes(data)
+        print("baked", os.path.basename(path),
+              "(%d raw bytes)" % len(data))
 
     print("ALL ASSETS BAKED ->", os.path.abspath(out))
 
