@@ -6,13 +6,19 @@ directly (or this file — it works there too).
 """
 
 import asyncio
-
-import polyon_the_game
+import traceback
 
 
 async def main():
-    game = polyon_the_game.Game()
-    await game.run()
+    try:
+        import polyon_the_game
+        game = polyon_the_game.Game()
+        await game.run()
+    except Exception:
+        # surface startup failures in the browser console instead of a
+        # silent gray canvas
+        traceback.print_exc()
+        raise
 
 
 asyncio.run(main())

@@ -26,6 +26,9 @@ jobs:
       - name: Clean test artifacts before packaging
         run: rm -rf tests/shots build
 
+      - name: Bake processed assets (fast startup in the browser)
+        run: python tools/bake_assets.py
+
       - name: Build web bundle
         run: python -m pygbag --build .
 

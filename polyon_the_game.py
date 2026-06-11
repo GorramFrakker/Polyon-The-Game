@@ -60,6 +60,29 @@ def resource_path(name):
                    os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, name)
 
+
+# Pre-processed sprites/sounds written by tools/bake_assets.py at build
+# time. Loading them skips the per-pixel startup work, which matters in
+# the browser where pure-Python pixel loops are very slow.
+_USE_BAKED = True
+BAKED_DIR = "baked"
+
+
+def baked_path(name):
+    return resource_path(os.path.join(BAKED_DIR, name))
+
+
+def load_baked_image(name):
+    if not _USE_BAKED:
+        return None
+    try:
+        p = baked_path(name)
+        if os.path.exists(p):
+            return pg.image.load(p).convert_alpha()
+    except Exception:
+        pass
+    return None
+
 GREEN_DARK = (0, 84, 42)
 GREEN = (0, 132, 61)
 GREEN_BRIGHT = (40, 168, 92)
@@ -193,8 +216,59 @@ def text(surf, msg, size, color, *, center=None, topleft=None, midtop=None,
 # Sound synthesis (no asset files)
 # ---------------------------------------------------------------------------
 
+SOUND_RATE = 22050
+
+SOUND_RECIPES = {
+    # name: ("tone", sweeps, ms, vol) or ("noise", ms, vol)
+    "shoot": ("tone", [(880, 480)], 70, 0.18),
+    "hit": ("tone", [(300, 180)], 90, 0.25),
+    "boom": ("noise", 220, 0.3),
+    "player_boom": ("noise", 550, 0.4),
+    "bonus": ("tone", [(660, 990), (990, 1320)], 240, 0.22),
+    "clear": ("tone", [(523, 659), (659, 784), (784, 1046)], 420, 0.25),
+    "life": ("tone", [(784, 1046), (1046, 1568)], 300, 0.25),
+    "boss_hit": ("tone", [(180, 140)], 70, 0.25),
+    "power": ("tone", [(523, 784), (784, 1175)], 200, 0.25),
+    "god": ("tone", [(196, 392), (392, 784), (784, 1568)], 500, 0.3),
+}
+
+
+def _tone_bytes(sweeps, ms, vol=0.3):
+    n = int(SOUND_RATE * ms / 1000)
+    per = max(1, n // len(sweeps))
+    buf = array.array("h")
+    phase = 0.0
+    for seg, (f0, f1) in enumerate(sweeps):
+        for i in range(per):
+            t = i / per
+            freq = f0 + (f1 - f0) * t
+            phase += 2 * math.pi * freq / SOUND_RATE
+            v = 1.0 if math.sin(phase) >= 0 else -1.0
+            env = 1.0 - (seg * per + i) / n
+            buf.append(int(v * env * vol * 32767))
+    return buf.tobytes()
+
+
+def _noise_bytes(ms, vol=0.3):
+    n = int(SOUND_RATE * ms / 1000)
+    buf = array.array("h")
+    v = 0.0
+    for i in range(n):
+        v = 0.6 * v + 0.4 * random.uniform(-1, 1)
+        env = (1.0 - i / n) ** 1.5
+        buf.append(int(v * env * vol * 32767))
+    return buf.tobytes()
+
+
+def synth_sound_bytes(name):
+    recipe = SOUND_RECIPES[name]
+    if recipe[0] == "tone":
+        return _tone_bytes(recipe[1], recipe[2], recipe[3])
+    return _noise_bytes(recipe[1], recipe[2])
+
+
 class Sounds:
-    RATE = 22050
+    RATE = SOUND_RATE
 
     def __init__(self):
         self.enabled = False
@@ -204,43 +278,16 @@ class Sounds:
             self.enabled = True
         except Exception:
             return
-        self.bank["shoot"] = self._tone([(880, 480)], 70, vol=0.18)
-        self.bank["hit"] = self._tone([(300, 180)], 90, vol=0.25)
-        self.bank["boom"] = self._noise(220, vol=0.3)
-        self.bank["player_boom"] = self._noise(550, vol=0.4)
-        self.bank["bonus"] = self._tone([(660, 990), (990, 1320)], 240, vol=0.22)
-        self.bank["clear"] = self._tone([(523, 659), (659, 784), (784, 1046)],
-                                        420, vol=0.25)
-        self.bank["life"] = self._tone([(784, 1046), (1046, 1568)], 300, vol=0.25)
-        self.bank["boss_hit"] = self._tone([(180, 140)], 70, vol=0.25)
-        self.bank["power"] = self._tone([(523, 784), (784, 1175)], 200, vol=0.25)
-        self.bank["god"] = self._tone([(196, 392), (392, 784), (784, 1568)],
-                                      500, vol=0.3)
-
-    def _tone(self, sweeps, ms, vol=0.3):
-        n = int(self.RATE * ms / 1000)
-        per = max(1, n // len(sweeps))
-        buf = array.array("h")
-        phase = 0.0
-        for seg, (f0, f1) in enumerate(sweeps):
-            for i in range(per):
-                t = i / per
-                freq = f0 + (f1 - f0) * t
-                phase += 2 * math.pi * freq / self.RATE
-                v = 1.0 if math.sin(phase) >= 0 else -1.0
-                env = 1.0 - (seg * per + i) / n
-                buf.append(int(v * env * vol * 32767))
-        return pg.mixer.Sound(buffer=buf.tobytes())
-
-    def _noise(self, ms, vol=0.3):
-        n = int(self.RATE * ms / 1000)
-        buf = array.array("h")
-        v = 0.0
-        for i in range(n):
-            v = 0.6 * v + 0.4 * random.uniform(-1, 1)
-            env = (1.0 - i / n) ** 1.5
-            buf.append(int(v * env * vol * 32767))
-        return pg.mixer.Sound(buffer=buf.tobytes())
+        for name in SOUND_RECIPES:
+            try:
+                wav = baked_path("snd_%s.wav" % name)
+                if _USE_BAKED and os.path.exists(wav):
+                    self.bank[name] = pg.mixer.Sound(wav)
+                else:
+                    self.bank[name] = pg.mixer.Sound(
+                        buffer=synth_sound_bytes(name))
+            except Exception:
+                pass
 
     def play(self, name):
         if self.enabled and name in self.bank:
@@ -500,6 +547,9 @@ def make_powerup(kind, size=30):
 def load_powerup_token(kind, size=36):
     """Round token cut from the Harrell's artwork shipped with the game.
     Falls back to the drawn badge if the image file is missing."""
+    baked = load_baked_image("pu_%s.png" % kind)
+    if baked:
+        return baked
     try:
         img = pg.image.load(resource_path(POWERUP_FILES[kind])).convert_alpha()
     except Exception:
@@ -707,6 +757,9 @@ def cut_checker_object(img):
 
 def load_player_bag(height=72):
     """The real POLYON 25KG bag from 'Polyon Bag.png'."""
+    baked = load_baked_image("player.png")
+    if baked:
+        return baked
     try:
         img = pg.image.load(resource_path("Polyon Bag.png")).convert_alpha()
     except Exception:
@@ -722,6 +775,9 @@ def load_player_bag(height=72):
 
 def load_bb_bullet(d=13):
     """One green prill cropped out of the 'BBs.jpeg' photo."""
+    baked = load_baked_image("bb.png")
+    if baked:
+        return baked
     try:
         img = pg.image.load(resource_path("BBs.jpeg")).convert_alpha()
     except Exception:
@@ -760,6 +816,9 @@ def load_bb_bullet(d=13):
 def load_harrells_logo(width=380):
     """The real Harrell's lockup with its checkerboard backdrop removed.
     The logo has no white of its own, so a plain threshold works here."""
+    baked = load_baked_image("harrells_%d.png" % width)
+    if baked:
+        return baked
     try:
         img = pg.image.load(
             resource_path("Harrells Logo.png")).convert_alpha()
@@ -778,6 +837,9 @@ def load_harrells_logo(width=380):
 
 def load_polyon_badge(width=330):
     """The 'Powered by POLYON' photo badge, framed in Polyon green."""
+    baked = load_baked_image("polyon.png")
+    if baked:
+        return baked
     try:
         img = pg.image.load(resource_path("Polyon Logo.png")).convert_alpha()
     except Exception:
