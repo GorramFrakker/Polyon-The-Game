@@ -31,8 +31,10 @@ jobs:
       - name: Remove build-time files before packaging
         run: rm -rf tests tools build
 
+      # baked WAVs are tiny and play fine in the browser; pygbag merely
+      # prefers OGG and errors without this flag
       - name: Build web bundle
-        run: python -m pygbag --build .
+        run: python -m pygbag --disable-sound-format-error --build .
 
       - name: Verify archive is valid gzip
         run: python -c "assert open('build/web/polyon-the-game.tar.gz','rb').read(2) == b'\x1f\x8b', 'archive is not gzipped'"
