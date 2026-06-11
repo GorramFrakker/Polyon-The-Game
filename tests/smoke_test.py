@@ -4,9 +4,15 @@ screenshots to tests/shots/ for visual inspection."""
 
 import os
 import sys
+import tempfile
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
+# isolate the high-score file so test runs don't pollute (or read) the
+# real leaderboard
+_tmp_home = tempfile.mkdtemp(prefix="polyon_test_")
+os.environ["HOME"] = _tmp_home
+os.environ["APPDATA"] = _tmp_home
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

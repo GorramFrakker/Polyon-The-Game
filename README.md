@@ -33,25 +33,36 @@ the Marshal's Cart at the turn, and take down the Mega Mower 9000 on 18.
 | ENTER | Start / confirm |
 | H | High scores (title screen) |
 
-## Play it on Windows
+## Play it
 
-Download **`PolyonTheGame.exe`** from the
-[latest release](../../releases/latest) and double-click it.
-It is a single self-contained executable — no installation, no Python,
-no scripts required.
+**In your browser:** the game is built with [pygbag](https://pygame-web.github.io)
+(pygame compiled to WebAssembly) and deployed to **Azure Static Web Apps**
+on every push — open the site's `*.azurestaticapps.net` URL and play.
+Click once to unlock sound. High scores persist in your browser
+(localStorage).
 
-(Every release is built and smoke-tested automatically on Windows by
-GitHub Actions using PyInstaller.)
+One-time setup to enable deployment:
+1. Azure Portal → create a **Static Web App** (Free plan, deployment
+   source "Other").
+2. Copy its deployment token into this repo's secret
+   `AZURE_STATIC_WEB_APPS_API_TOKEN`.
+3. Push (or re-run the workflow) — done. Until the secret exists, CI
+   still builds and uploads the web bundle as the `PolyonTheGame-Web`
+   artifact and simply skips the deploy step.
 
-**Or run from source** (any OS):
+**Windows executable (legacy):** the v1–v3 single-file
+`PolyonTheGame.exe` builds remain on the [releases page](../../releases);
+new versions are web-only.
+
+**From source** (any OS):
 
 ```sh
 pip install -r requirements.txt
 python polyon_the_game.py
 ```
 
-High scores are saved to `%APPDATA%\PolyonTheGame\highscores.json` on
-Windows (`~/.polyon_the_game/` elsewhere).
+Desktop high scores are saved to `%APPDATA%\PolyonTheGame\highscores.json`
+on Windows (`~/.polyon_the_game/` elsewhere).
 
 ## Scoring
 
