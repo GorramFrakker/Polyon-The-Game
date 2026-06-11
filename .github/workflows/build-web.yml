@@ -26,6 +26,14 @@ jobs:
       - name: Bake processed assets (fast startup in the browser)
         run: python tools/bake_assets.py
 
+      - name: Convert baked audio to OGG
+        run: |
+          for f in baked/snd_*.wav; do
+            ffmpeg -loglevel error -y -i "$f" "${f%.wav}.ogg"
+            rm "$f"
+          done
+          ls baked/
+
       # tests/ and tools/ are build-time only; pygbag tries to transform
       # every .py it finds and chokes on the bake script
       - name: Remove build-time files before packaging
@@ -51,7 +59,18 @@ jobs:
               {
                 "route": "/polyon-the-game.tar.gz",
                 "rewrite": "/polyon-the-game.bin",
-                "headers": { "Content-Type": "application/octet-stream" }
+                "headers": {
+                  "Content-Type": "application/octet-stream",
+                  "Cache-Control": "no-cache"
+                }
+              },
+              {
+                "route": "/index.html",
+                "headers": { "Cache-Control": "no-cache" }
+              },
+              {
+                "route": "/",
+                "headers": { "Cache-Control": "no-cache" }
               }
             ],
             "mimeTypes": {

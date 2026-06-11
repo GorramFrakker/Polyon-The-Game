@@ -11,8 +11,12 @@ import traceback
 
 async def main():
     try:
+        print("POLYON: importing game module", flush=True)
         import polyon_the_game
+        print("POLYON: building game (v%s)" % polyon_the_game.VERSION,
+              flush=True)
         game = polyon_the_game.Game()
+        print("POLYON: entering main loop", flush=True)
         await game.run()
     except Exception:
         # surface startup failures in the browser console instead of a

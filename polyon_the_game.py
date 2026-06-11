@@ -280,12 +280,18 @@ class Sounds:
             return
         for name in SOUND_RECIPES:
             try:
-                wav = baked_path("snd_%s.wav" % name)
-                if _USE_BAKED and os.path.exists(wav):
-                    self.bank[name] = pg.mixer.Sound(wav)
-                else:
-                    self.bank[name] = pg.mixer.Sound(
-                        buffer=synth_sound_bytes(name))
+                snd = None
+                if _USE_BAKED:
+                    # extension built dynamically: pygbag's packager
+                    # rewrites ".wav" string literals to ".ogg"
+                    for ext in ("ogg", "wav"):
+                        p = baked_path("snd_%s.%s" % (name, ext))
+                        if os.path.exists(p):
+                            snd = pg.mixer.Sound(p)
+                            break
+                if snd is None:
+                    snd = pg.mixer.Sound(buffer=synth_sound_bytes(name))
+                self.bank[name] = snd
             except Exception:
                 pass
 
